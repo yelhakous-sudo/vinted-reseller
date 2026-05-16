@@ -302,8 +302,11 @@
     function renderDeals(debug) {
       const grid = $('dealsGrid');
       if (deals.length === 0) {
-        const errHtml = debug?.error ? `<p style="color:var(--red);font-size:12px;margin-top:12px;background:var(--surface);padding:8px 12px;border-radius:8px;border:1px solid var(--border)">${debug.error}</p>` : '';
-        grid.innerHTML = `<div class="empty-state"><div class="emoji">&#128270;</div><h2>Aucune affaire trouvee</h2><p>Essaie de relancer une recherche.</p>${errHtml}</div>`;
+        let info = '';
+        if (debug?.logs) {
+          info = `<div style="font-size:11px;color:var(--text2);margin-top:12px;background:var(--surface);padding:10px 14px;border-radius:8px;border:1px solid var(--border);text-align:left;max-width:500px;margin-left:auto;margin-right:auto;word-break:break-all"><strong>Debug:</strong><br>${debug.logs.map(l => '&bull; '+l).join('<br>')}</div>`;
+        }
+        grid.innerHTML = `<div class="empty-state"><div class="emoji">&#128270;</div><h2>Aucune affaire trouvee</h2><p>Essaie de relancer une recherche.</p>${info}</div>`;
         return;
       }
       grid.innerHTML = deals.map((d, i) => {
