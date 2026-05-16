@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vinted Reseller - Deal Finder</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0f; --surface: #13131a; --surface2: #1a1a24;
+      --border: #2a2a3a; --text: #e8e8f0; --text2: #8888a0;
+      --accent: #6c5ce7; --accent2: #a29bfe; --green: #00d68f;
+      --green-bg: rgba(0,214,143,0.12); --red: #ff6b6b; --orange: #ffa726;
+      --radius: 16px; --radius-sm: 10px;
+    }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden;
+    }
+    body::before {
+      content: ''; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
+      background: radial-gradient(ellipse at 30% 20%, rgba(108,92,231,0.06) 0%, transparent 50%),
+                  radial-gradient(ellipse at 70% 80%, rgba(0,214,143,0.04) 0%, transparent 50%);
+      pointer-events: none; z-index: 0;
+    }
+    .header {
+      position: relative; z-index: 1; padding: 24px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10,10,15,0.8); backdrop-filter: blur(20px);
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .logo {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 800; color: #fff;
+    }
+    .header h1 {
+      font-size: 20px; font-weight: 700;
+      background: linear-gradient(135deg, #fff 30%, var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .header-sub { font-size: 13px; color: var(--text2); margin-top: 2px; }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .stats-bar {
+      display: flex; gap: 24px; padding: 4px 20px;
+      background: var(--surface); border-radius: 100px;
+      border: 1px solid var(--border); font-size: 13px;
+    }
+    .stat-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .stat-value { font-weight: 700; color: #fff; }
+    .stat-label { color: var(--text2); }
+    .refresh-btn {
+      position: relative; padding: 10px 28px; border: none; border-radius: 100px;
+      background: linear-gradient(135deg, var(--accent), #5a4bd1); color: #fff;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+      transition: all 0.25s ease;
+      box-shadow: 0 4px 20px rgba(108,92,231,0.3);
+    }
+    .refresh-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(108,92,231,0.45); }
+    .refresh-btn:active { transform: translateY(0); }
+    .refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .refresh-btn .icon { font-size: 18px; transition: transform 0.6s ease; }
+    .refresh-btn.loading .icon { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .main {
+      position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 32px;
+    }
+    .status-bar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 20px; background: var(--surface);
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+      margin-bottom: 28px; font-size: 14px;
+    }
+    .status-bar .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text2); flex-shrink: 0;
+    }
+    .status-bar .dot.idle { background: var(--text2); }
+    .status-bar .dot.scanning { background: var(--orange); animation: pulse 0.8s ease infinite; }
+    .status-bar .dot.done { background: var(--green); }
+    .status-bar .dot.error { background: var(--red); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .status-text { color: var(--text2); }
+    .status-text strong { color: var(--text); font-weight: 600; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: var(--surface); border-radius: var(--radius);
+      border: 1px solid var(--border); overflow: hidden;
+      transition: all 0.3s ease;
+      opacity: 0; transform: translateY(20px);
+      animation: fadeUp 0.5s ease forwards;
+    }
+    .card:nth-child(1) { animation-delay: 0.05s; }
+    .card:nth-child(2) { animation-delay: 0.10s; }
+    .card:nth-child(3) { animation-delay: 0.15s; }
+    .card:nth-child(4) { animation-delay: 0.20s; }
+    .card:nth-child(5) { animation-delay: 0.25s; }
+    .card:nth-child(6) { animation-delay: 0.30s; }
+    .card:nth-child(7) { animation-delay: 0.35s; }
+    .card:nth-child(8) { animation-delay: 0.40s; }
+    .card:nth-child(9) { animation-delay: 0.45s; }
+    .card:nth-child(10) { animation-delay: 0.50s; }
+    @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.4); border-color: rgba(108,92,231,0.3); }
+    .card-img-wrap {
+      position: relative; width: 100%; height: 220px;
+      background: var(--surface2); overflow: hidden;
+    }
+    .card-img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s ease; }
+    .card:hover .card-img { transform: scale(1.05); }
+    .card-img-placeholder {
+      width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+      color: var(--text2); font-size: 48px;
+      background: linear-gradient(135deg, var(--surface2), var(--surface));
+    }
+    .card-badge {
+      position: absolute; top: 12px; right: 12px;
+      padding: 4px 12px; border-radius: 100px;
+      font-size: 11px; font-weight: 700;
+      background: var(--green-bg); color: var(--green);
+      backdrop-filter: blur(10px);
+    }
+    .card-badge.high-profit { background: rgba(255,107,107,0.15); color: var(--red); }
+    .card-body { padding: 16px 18px 18px; }
+    .card-brand {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--accent2); margin-bottom: 4px;
+    }
+    .card-title {
+      font-size: 15px; font-weight: 600; line-height: 1.3;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; margin-bottom: 10px; min-height: 38px;
+    }
+    .card-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .card-tag {
+      padding: 2px 8px; border-radius: 6px; background: var(--surface2);
+      border: 1px solid var(--border); font-size: 11px; color: var(--text2);
+    }
+    .card-prices {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; background: var(--surface2);
+      border-radius: var(--radius-sm); margin-bottom: 12px;
+    }
+    .price-current { font-size: 18px; font-weight: 800; color: #fff; }
+    .price-arrow { color: var(--text2); font-size: 16px; }
+    .price-estimated {
+      font-size: 18px; font-weight: 800;
+      background: linear-gradient(135deg, var(--green), #00e676);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .price-profit { margin-left: auto; text-align: right; }
+    .profit-amount { font-size: 16px; font-weight: 800; color: var(--green); }
+    .profit-amount.negative { color: var(--red); }
+    .profit-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); }
+    .card-footer { display: flex; align-items: center; gap: 8px; }
+    .card-footer .info { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 4px; }
+    .card-footer .info + .info { margin-left: auto; }
+    .card-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 100px; background: var(--accent); color: #fff;
+      font-size: 12px; font-weight: 600; text-decoration: none;
+      transition: all 0.2s ease; margin-left: auto; flex-shrink: 0;
+    }
+    .card-link:hover { background: #7c6ef7; transform: translateX(2px); }
+    .empty-state {
+      grid-column: 1 / -1; text-align: center;
+      padding: 80px 20px; color: var(--text2);
+    }
+    .empty-state .emoji { font-size: 64px; margin-bottom: 16px; }
+    .empty-state h2 { font-size: 20px; color: var(--text); margin-bottom: 8px; }
+    .empty-state p { font-size: 14px; max-width: 400px; margin: 0 auto; line-height: 1.6; }
+    .scanning-progress {
+      display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(10,10,15,0.85); backdrop-filter: blur(8px);
+      z-index: 100; align-items: center; justify-content: center;
+      flex-direction: column; gap: 20px;
+    }
+    .scanning-progress.active { display: flex; }
+    .scanning-progress .spinner {
+      width: 48px; height: 48px; border: 3px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .scanning-progress .scan-text { font-size: 18px; font-weight: 600; }
+    .scanning-progress .scan-sub { font-size: 14px; color: var(--text2); }
+    .toast {
+      position: fixed; bottom: 24px; left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      padding: 12px 24px; border-radius: 100px;
+      background: var(--surface); border: 1px solid var(--border);
+      font-size: 14px; z-index: 200; opacity: 0;
+      transition: all 0.4s ease; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    @media (max-width: 768px) {
+      .header { padding: 16px 20px; flex-wrap: wrap; gap: 12px; }
+      .header-right { width: 100%; justify-content: flex-end; }
+      .stats-bar { display: none; }
+      .header h1 { font-size: 17px; }
+      .main { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      .card-img-wrap { height: 180px; }
+      .refresh-btn { width: 100%; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="scanning-progress" id="scanOverlay">
+    <div class="spinner"></div>
+    <div class="scan-text">Recherche des bonnes affaires...</div>
+    <div class="scan-sub">Scan de 29 mots-cles sur Vinted en parallele</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">V</div>
+      <div>
+        <h1>Vinted Reseller</h1>
+        <div class="header-sub">Trouve les meilleures affaires a revendre</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="stats-bar" id="statsBar">
+        <div class="stat-item"><span class="stat-value" id="totalFound">0</span> <span class="stat-label">affaires</span></div>
+        <div class="stat-item"><span class="stat-value" id="avgProfit">0</span> <span class="stat-label">profit moy.</span></div>
+        <div class="stat-item"><span class="stat-value" id="bestProfit">0</span> <span class="stat-label">meilleur</span></div>
+      </div>
+      <button class="refresh-btn" id="refreshBtn" onclick="scanDeals()">
+        <span class="icon">&#8635;</span>
+        <span>Actualiser</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="status-bar" id="statusBar">
+      <span class="dot idle" id="statusDot"></span>
+      <span class="status-text" id="statusText">Appuyez sur <strong>Actualiser</strong> pour trouver des deals avec +20EUR de profit</span>
+    </div>
+    <div class="grid" id="dealsGrid">
+      <div class="empty-state">
+        <div class="emoji">&#128253;</div>
+        <h2>Pret a trouver des affaires</h2>
+        <p>Cliquez sur Actualiser pour scanner Vinted et decouvrir les articles avec le meilleur potentiel de revente.</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let isScanning = false;
+    let deals = [];
+
+    function $(id) { return document.getElementById(id); }
+
+    function showToast(msg) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function updateStats() {
+      $('totalFound').textContent = deals.length;
+      if (deals.length > 0) {
+        const avg = deals.reduce((s, d) => s + d.profit, 0) / deals.length;
+        $('avgProfit').textContent = avg.toFixed(0) + '\u20AC';
+        $('bestProfit').textContent = Math.max(...deals.map(d => d.profit)).toFixed(0) + '\u20AC';
+      }
+    }
+
+    function getProfitLabel(profit) {
+      if (profit >= 100) return ['Profit exceptionnel', 'high-profit'];
+      if (profit >= 50) return ['Tres haute marge', 'high-profit'];
+      if (profit >= 30) return ['Haute marge', ''];
+      return ['Bon profit', ''];
+    }
+
+    function formatStatus(s) {
+      if (!s) return '';
+      const map = {
+        'new with tags': 'Neuf etiquette',
+        'new without tags': 'Neuf sans etiquette',
+        'very good': 'Tres bon etat',
+        'good': 'Bon etat',
+        'satisfactory': 'Correct',
+      };
+      return map[s.toLowerCase()] || s;
+    }
+
+    function renderDeals() {
+      const grid = $('dealsGrid');
+      if (deals.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><div class="emoji">&#128270;</div><h2>Aucune affaire trouvee</h2><p>Essaie de relancer une recherche.</p></div>';
+        return;
+      }
+      grid.innerHTML = deals.map((d, i) => {
+        const [label, cls] = getProfitLabel(d.profit);
+        const profitCls = d.profit >= 0 ? '' : 'negative';
+        return `
+        <div class="card" style="animation-delay:${i*0.05}s">
+          <div class="card-img-wrap">
+            ${d.photo
+              ? `<img class="card-img" src="${d.photo}" alt="${d.title}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=card-img-placeholder>&#128180;</div>'">`
+              : `<div class="card-img-placeholder">&#128180;</div>`
+            }
+            <div class="card-badge ${cls}">${label}</div>
+          </div>
+          <div class="card-body">
+            <div class="card-brand">${d.brand || 'Sans marque'}</div>
+            <div class="card-title">${d.title || 'Sans titre'}</div>
+            <div class="card-meta">
+              ${d.size ? `<span class="card-tag">${d.size}</span>` : ''}
+              <span class="card-tag">${formatStatus(d.status)}</span>
+              <span class="card-tag">&#128147; ${d.favs}</span>
+            </div>
+            <div class="card-prices">
+              <div>
+                <div class="price-current">${d.price.toFixed(2)}\u20AC</div>
+                <div style="font-size:10px;color:var(--text2)">Prix actuel</div>
+              </div>
+              <div class="price-arrow">&#8594;</div>
+              <div>
+                <div class="price-estimated">${d.estimated.toFixed(2)}\u20AC</div>
+                <div style="font-size:10px;color:var(--text2)">Revente estime</div>
+              </div>
+              <div class="price-profit">
+                <div class="profit-amount ${profitCls}">+${d.profit.toFixed(2)}\u20AC</div>
+                <div class="profit-label">Profit</div>
+              </div>
+            </div>
+            <div class="card-footer">
+              <span class="info">&#128100; ${d.seller}</span>
+              <span class="info">&#128200; Score ${d.score}</span>
+              <a class="card-link" href="${d.url}" target="_blank" rel="noopener">Voir &#8599;</a>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      updateStats();
+    }
+
+    async function scanDeals() {
+      if (isScanning) return;
+      isScanning = true;
+
+      const btn = $('refreshBtn');
+      const dot = $('statusDot');
+      const status = $('statusText');
+      const overlay = $('scanOverlay');
+
+      btn.classList.add('loading');
+      btn.disabled = true;
+      dot.className = 'dot scanning';
+      status.innerHTML = 'Scan de Vinted en cours...';
+      overlay.classList.add('active');
+
+      try {
+        const resp = await fetch('/.netlify/functions/deals');
+        const data = await resp.json();
+
+        deals = data.deals || [];
+        renderDeals();
+
+        dot.className = 'dot done';
+        status.innerHTML = `<strong>${deals.length} affaires</strong> trouvees avec +20\u20AC de profit`;
+        showToast(`${deals.length} deals trouves !`);
+      } catch (err) {
+        dot.className = 'dot error';
+        status.innerHTML = 'Erreur de connexion au serveur';
+        showToast('Erreur lors du scan');
+      }
+
+      overlay.classList.remove('active');
+      btn.classList.remove('loading');
+      btn.disabled = false;
+      isScanning = false;
+    }
+
+    window.addEventListener('DOMContentLoaded', () => setTimeout(scanDeals, 300));
+  </script>
+
+</body>
+</html>
