@@ -299,10 +299,11 @@
       return map[s.toLowerCase()] || s;
     }
 
-    function renderDeals() {
+    function renderDeals(debug) {
       const grid = $('dealsGrid');
       if (deals.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><div class="emoji">&#128270;</div><h2>Aucune affaire trouvee</h2><p>Essaie de relancer une recherche.</p></div>';
+        const errHtml = debug?.error ? `<p style="color:var(--red);font-size:12px;margin-top:12px;background:var(--surface);padding:8px 12px;border-radius:8px;border:1px solid var(--border)">${debug.error}</p>` : '';
+        grid.innerHTML = `<div class="empty-state"><div class="emoji">&#128270;</div><h2>Aucune affaire trouvee</h2><p>Essaie de relancer une recherche.</p>${errHtml}</div>`;
         return;
       }
       grid.innerHTML = deals.map((d, i) => {
@@ -371,7 +372,7 @@
         const data = await resp.json();
 
         deals = data.deals || [];
-        renderDeals();
+        renderDeals(data.debug);
 
         dot.className = 'dot done';
         status.innerHTML = `<strong>${deals.length} affaires</strong> trouvees avec +20\u20AC de profit`;

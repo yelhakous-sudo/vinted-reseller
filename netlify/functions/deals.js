@@ -1,7 +1,7 @@
-// Vinted session cache (persists across warm invocations)
 let accessToken = '';
 let cookieStr = '';
 let lastInit = 0;
+let initAttempts = 0;
 
 const BRAND_RESALE = {
   supreme: 2.5, nike: 1.6, adidas: 1.4, jordan: 2.5,
@@ -24,21 +24,52 @@ const CONDITION_VALUE = {
 };
 
 const SEARCH_TERMS = [
-  "pull", "veste", "jeans", "basket", "t-shirt", "chemise",
-  "manteau", "blouson", "sweat", "hoodie", "pantalon", "robe",
-  "blazer", "costume", "parka", "doudoune", "maillot", "short",
-  "nike", "adidas", "zara", "carhartt", "supreme", "jordan",
-  "levis", "lacoste", "ralph lauren", "tommy hilfiger", "boss",
+  "nike", "adidas", "jordan", "supreme", "yeezy",
+  "carhartt", "zara", "the north face", "stone island",
+  "gucci", "prada", "moncler", "boss", "ralph lauren",
+  "lacoste", "levis", "hoodie", "veste", "basket",
+  "doudoune", "pull", "jeans", "t-shirt", "manteau",
+  "blouson", "sweat", "pantalon", "chemise", "parka",
 ];
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+function parseSetCookies(resp) {
+  try {
+    // Node 19+ method
+    if (typeof resp.headers.getSetCookie === 'function') {
+      const c = resp.headers.getSetCookie();
+      if (c && c.length > 0) return c;
+    }
+  } catch {}
+
+  try {
+    // Node.js undici internal
+    const raw = resp.headers.raw();
+    if (raw && raw['set-cookie'] && raw['set-cookie'].length > 0) {
+      return raw['set-cookie'];
+    }
+  } catch {}
+
+  try {
+    // Fallback: single header
+    const single = resp.headers.get('set-cookie');
+    if (single) return [single];
+  } catch {}
+
+  return [];
+}
+
 async function initSession() {
-  const resp = await fetch('https://www.vinted.fr/', { headers: { 'User-Agent': UA } });
-  const cookies = resp.headers.getSetCookie?.() || [];
-  const pairs = cookies.map(c => c.split(';')[0]);
+  initAttempts++;
+  const resp = await fetch('https://www.vinted.fr/', {
+    headers: { 'User-Agent': UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
+    redirect: 'follow',
+  });
+
+  const rawCookies = parseSetCookies(resp);
+  const pairs = rawCookies.map(c => c.split(';')[0]);
   cookieStr = pairs.join('; ');
-  // Get the LAST access_token_web (first one might be a deletion cookie)
   const atCookies = pairs.filter(p => p.startsWith('access_token_web='));
   accessToken = atCookies.length > 0 ? atCookies[atCookies.length - 1].split('=')[1] : '';
   lastInit = Date.now();
@@ -71,24 +102,14 @@ function analyzeItem(item) {
     const score = Math.round(profit * (roi / 100) * 10) / 10;
 
     return {
-      id: item.id,
-      title,
-      brand: brandTitle,
-      price,
-      estimated,
-      profit,
-      score,
+      id: item.id, title, brand: brandTitle, price, estimated, profit, score,
       status: status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-      size: item.size_title || '',
-      url: item.url || '',
-      favs: item.favourite_count || 0,
-      views: item.view_count || 0,
+      size: item.size_title || '', url: item.url || '',
+      favs: item.favourite_count || 0, views: item.view_count || 0,
       seller: item.user?.login || '?',
       photo: item.photos?.[0]?.url || item.photo?.url || '',
     };
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function fetchKeyword(keyword) {
@@ -106,7 +127,7 @@ async function fetchKeyword(keyword) {
 
   const resp = await fetch(`https://www.vinted.fr/api/v2/catalog/items?${params}`, { headers });
 
-  if (resp.status === 401) {
+  if (resp.status === 401 && initAttempts < 3) {
     await initSession();
     headers['Authorization'] = `Bearer ${accessToken}`;
     const retry = await fetch(`https://www.vinted.fr/api/v2/catalog/items?${params}`, { headers });
@@ -121,28 +142,53 @@ async function fetchKeyword(keyword) {
 }
 
 export async function handler(event, context) {
-  // Ensure session is initialized
-  if (!accessToken || Date.now() - lastInit > 300000) {
-    await initSession();
+  const errors = [];
+  let sessionOk = false;
+
+  try {
+    if (!accessToken || Date.now() - lastInit > 300000) {
+      await initSession();
+    }
+    sessionOk = accessToken.length > 20;
+    if (!sessionOk) errors.push('Session init failed: no access token');
+  } catch (e) {
+    errors.push(`Session error: ${e.message}`);
+  }
+
+  if (!sessionOk) {
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({
+        deals: [],
+        debug: { error: errors.join('; '), sessionOk, initAttempts },
+      }),
+    };
   }
 
   const allDeals = [];
   const MIN_PROFIT = 20;
   const TARGET = 10;
+  let keywordsSearched = 0;
 
-  // Process keywords in parallel batches of 5 to balance speed vs rate limiting
   const BATCH_SIZE = 5;
   for (let i = 0; i < SEARCH_TERMS.length && allDeals.length < TARGET; i += BATCH_SIZE) {
     const batch = SEARCH_TERMS.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(batch.map(k => fetchKeyword(k)));
+    keywordsSearched += batch.length;
 
-    for (const items of results) {
-      for (const item of items) {
+    try {
+      const results = await Promise.all(batch.map(k => fetchKeyword(k)));
+
+      for (const items of results) {
+        for (const item of items) {
+          if (allDeals.length >= TARGET) break;
+          const deal = analyzeItem(item);
+          if (deal) allDeals.push(deal);
+        }
         if (allDeals.length >= TARGET) break;
-        const deal = analyzeItem(item);
-        if (deal) allDeals.push(deal);
       }
-      if (allDeals.length >= TARGET) break;
+    } catch (e) {
+      errors.push(`Batch error: ${e.message}`);
     }
   }
 
@@ -150,10 +196,10 @@ export async function handler(event, context) {
 
   return {
     statusCode: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-    body: JSON.stringify({ deals: allDeals.slice(0, TARGET) }),
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    body: JSON.stringify({
+      deals: allDeals.slice(0, TARGET),
+      debug: { keywordsSearched, dealsFound: allDeals.length, sessionOk, errors: errors.length ? errors : undefined },
+    }),
   };
 }
