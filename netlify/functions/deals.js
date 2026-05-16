@@ -1,8 +1,3 @@
-let accessToken = '';
-let cookieStr = '';
-let lastInit = 0;
-let initAttempts = 0;
-
 const BRAND_RESALE = {
   supreme: 2.5, nike: 1.6, adidas: 1.4, jordan: 2.5,
   yeezy: 2.8, gucci: 2.0, "louis vuitton": 2.3, zara: 1.15,
@@ -23,84 +18,66 @@ const CONDITION_VALUE = {
   good: 0.60, satisfactory: 0.45, not_specified: 0.50,
 };
 
+// Top 18 most profitable keywords - fast scan
 const SEARCH_TERMS = [
   "nike", "adidas", "jordan", "supreme", "yeezy",
-  "carhartt", "zara", "the north face", "stone island",
-  "gucci", "prada", "moncler", "boss", "ralph lauren",
-  "lacoste", "levis", "hoodie", "veste", "basket",
-  "doudoune", "pull", "jeans", "t-shirt", "manteau",
-  "blouson", "sweat", "pantalon", "chemise", "parka",
+  "carhartt", "the north face", "stone island", "gucci", "prada",
+  "moncler", "ralph lauren", "lacoste", "boss", "hoodie",
+  "veste", "basket", "doudoune",
 ];
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-function parseSetCookies(resp) {
-  try {
-    // Node 19+ method
-    if (typeof resp.headers.getSetCookie === 'function') {
-      const c = resp.headers.getSetCookie();
-      if (c && c.length > 0) return c;
-    }
-  } catch {}
+// ---- Session cache (persists across warm starts) ----
+let cachedToken = '';
+let cachedCookie = '';
+let lastInit = 0;
 
-  try {
-    // Node.js undici internal
-    const raw = resp.headers.raw();
-    if (raw && raw['set-cookie'] && raw['set-cookie'].length > 0) {
-      return raw['set-cookie'];
-    }
-  } catch {}
-
-  try {
-    // Fallback: single header
-    const single = resp.headers.get('set-cookie');
-    if (single) return [single];
-  } catch {}
-
+function getCookiesFromResponse(resp) {
+  const methods = [
+    () => resp.headers.getSetCookie?.(),
+    () => resp.headers.raw?.()?.['set-cookie'],
+    () => { const v = resp.headers.get('set-cookie'); return v ? [v] : null; },
+  ];
+  for (const fn of methods) {
+    try {
+      const result = fn();
+      if (result && result.length > 0) return result;
+    } catch {}
+  }
   return [];
 }
 
 async function initSession() {
-  initAttempts++;
   const resp = await fetch('https://www.vinted.fr/', {
     headers: { 'User-Agent': UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
     redirect: 'follow',
   });
-
-  const rawCookies = parseSetCookies(resp);
-  const pairs = rawCookies.map(c => c.split(';')[0]);
-  cookieStr = pairs.join('; ');
+  const raw = getCookiesFromResponse(resp);
+  const pairs = raw.map(c => c.split(';')[0]);
+  cachedCookie = pairs.join('; ');
   const atCookies = pairs.filter(p => p.startsWith('access_token_web='));
-  accessToken = atCookies.length > 0 ? atCookies[atCookies.length - 1].split('=')[1] : '';
+  cachedToken = atCookies.length > 0 ? atCookies[atCookies.length - 1].split('=')[1] : '';
   lastInit = Date.now();
-}
-
-function getBrandMult(title, brandTitle) {
-  const text = `${brandTitle} ${title}`.toLowerCase();
-  let best = 1.0;
-  for (const [brand, mult] of Object.entries(BRAND_RESALE)) {
-    if (text.includes(brand) && mult > best) best = mult;
-  }
-  return best;
 }
 
 function analyzeItem(item) {
   try {
     const price = parseFloat(item.price?.amount);
     if (isNaN(price) || price <= 0 || price > 300) return null;
-
     const title = item.title || '';
     const brandTitle = item.brand_title || '';
     const status = item.status || 'not_specified';
-    const bm = getBrandMult(title, brandTitle);
+    const text = `${brandTitle} ${title}`.toLowerCase();
+    let bm = 1.0;
+    for (const [brand, mult] of Object.entries(BRAND_RESALE)) {
+      if (text.includes(brand) && mult > bm) bm = mult;
+    }
     const cm = CONDITION_VALUE[status] || 0.5;
     const estimated = Math.round(Math.max(price * bm * (0.65 + 0.35 * cm), price * 1.1) * 100) / 100;
     const profit = Math.round((estimated - price) * 100) / 100;
     if (profit < 20) return null;
-
-    const roi = (profit / price) * 100;
-    const score = Math.round(profit * (roi / 100) * 10) / 10;
-
+    const score = Math.round(profit * ((profit / price) * 100 / 100) * 10) / 10;
     return {
       id: item.id, title, brand: brandTitle, price, estimated, profit, score,
       status: status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
@@ -114,92 +91,81 @@ function analyzeItem(item) {
 
 async function fetchKeyword(keyword) {
   const headers = {
-    'Authorization': `Bearer ${accessToken}`,
+    'Authorization': `Bearer ${cachedToken}`,
     'Accept': 'application/json',
     'User-Agent': UA,
     'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
   };
-  if (cookieStr) headers['Cookie'] = cookieStr;
+  if (cachedCookie) headers['Cookie'] = cachedCookie;
 
   const params = new URLSearchParams({
     search_text: keyword, page: '1', per_page: '20', order: 'newest_first',
   });
 
   const resp = await fetch(`https://www.vinted.fr/api/v2/catalog/items?${params}`, { headers });
-
-  if (resp.status === 401 && initAttempts < 3) {
-    await initSession();
-    headers['Authorization'] = `Bearer ${accessToken}`;
-    const retry = await fetch(`https://www.vinted.fr/api/v2/catalog/items?${params}`, { headers });
-    if (!retry.ok) return [];
-    const data = await retry.json();
-    return data.items || [];
-  }
-
   if (!resp.ok) return [];
   const data = await resp.json();
   return data.items || [];
 }
 
 export async function handler(event, context) {
-  const errors = [];
-  let sessionOk = false;
+  const start = Date.now();
+  const logs = [];
 
+  // 1. Init session
   try {
-    if (!accessToken || Date.now() - lastInit > 300000) {
-      await initSession();
-    }
-    sessionOk = accessToken.length > 20;
-    if (!sessionOk) errors.push('Session init failed: no access token');
+    if (!cachedToken || Date.now() - lastInit > 240000) await initSession();
+    logs.push(`token:${cachedToken.slice(0, 10)}... len:${cachedToken.length}`);
   } catch (e) {
-    errors.push(`Session error: ${e.message}`);
+    logs.push(`init_err:${e.message}`);
   }
 
-  if (!sessionOk) {
-    return {
-      statusCode: 200,
+  if (!cachedToken || cachedToken.length < 20) {
+    return { statusCode: 200,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({
-        deals: [],
-        debug: { error: errors.join('; '), sessionOk, initAttempts },
-      }),
-    };
+      body: JSON.stringify({ deals: [], debug: { error: 'Impossible de se connecter a Vinted (session bloque)', logs } }) };
   }
 
+  // 2. Fetch all keywords in parallel (fastest approach for serverless)
   const allDeals = [];
-  const MIN_PROFIT = 20;
-  const TARGET = 10;
-  let keywordsSearched = 0;
+  try {
+    const results = await Promise.all(SEARCH_TERMS.map(k => fetchKeyword(k)));
+    logs.push(`keywords:${SEARCH_TERMS.length}`);
+    let totalItems = 0;
+    for (const items of results) {
+      totalItems += items.length;
+      for (const item of items) {
+        const deal = analyzeItem(item);
+        if (deal) allDeals.push(deal);
+      }
+    }
+    logs.push(`items:${totalItems} deals:${allDeals.length}`);
+  } catch (e) {
+    logs.push(`fetch_err:${e.message}`);
+  }
 
-  const BATCH_SIZE = 5;
-  for (let i = 0; i < SEARCH_TERMS.length && allDeals.length < TARGET; i += BATCH_SIZE) {
-    const batch = SEARCH_TERMS.slice(i, i + BATCH_SIZE);
-    keywordsSearched += batch.length;
-
+  // 3. If token expired (all requests returned 0 items), retry once
+  if (allDeals.length === 0 && logs.some(l => l.startsWith('items:0'))) {
+    logs.push('retry_init');
     try {
-      const results = await Promise.all(batch.map(k => fetchKeyword(k)));
-
+      await initSession();
+      const results = await Promise.all(SEARCH_TERMS.map(k => fetchKeyword(k)));
       for (const items of results) {
         for (const item of items) {
-          if (allDeals.length >= TARGET) break;
           const deal = analyzeItem(item);
           if (deal) allDeals.push(deal);
         }
-        if (allDeals.length >= TARGET) break;
       }
-    } catch (e) {
-      errors.push(`Batch error: ${e.message}`);
-    }
+    } catch (e) { logs.push(`retry_err:${e.message}`); }
   }
 
   allDeals.sort((a, b) => b.score - a.score);
+  const elapsed = Date.now() - start;
+  logs.push(`time:${elapsed}ms`);
 
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    body: JSON.stringify({
-      deals: allDeals.slice(0, TARGET),
-      debug: { keywordsSearched, dealsFound: allDeals.length, sessionOk, errors: errors.length ? errors : undefined },
-    }),
+    body: JSON.stringify({ deals: allDeals.slice(0, 10), debug: { logs } }),
   };
 }
